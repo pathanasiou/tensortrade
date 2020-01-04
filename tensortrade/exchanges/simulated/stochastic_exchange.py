@@ -15,13 +15,14 @@
 import re
 
 import pandas as pd
-from stochastic.noise import GaussianNoise
 from stochastic.continuous import FractionalBrownianMotion
+from stochastic.noise import GaussianNoise
+
 from tensortrade.exchanges.simulated.simulated_exchange import SimulatedExchange
 from tensortrade.exchanges.simulated.stochastic.stoch_gen import *
 
 
-class StochasticExchange(SimulatedExchange):
+class StochasticExchange( SimulatedExchange ):
     """A simulated instrument exchange, in which the price history is based off a
     *   Geometric Brownian Motion
     *   The Merton Jump-Diffusion Model
@@ -31,8 +32,8 @@ class StochasticExchange(SimulatedExchange):
     """
 
     def __init__(self, **kwargs):
-        super().__init__(data_frame=None, **kwargs)
 
+        super().__init__(data_frame=None, **kwargs)
         self._base_price = self.default('base_price', 1, kwargs)
         self._base_volume = self.default('base_volume', 1, kwargs)
         self._start_date = self.default('start_date', '2010-01-01', kwargs)
@@ -48,8 +49,8 @@ class StochasticExchange(SimulatedExchange):
                                           self.get_model_params(self._param_type, self._base_price,
                                                                 self._times_to_generate,
                                                                 self._delta), kwargs)
-
         self._generate_price_history()
+
 
     def _scale_times_to_generate(self):
         if 'MIN' in self._timeframe.upper():
@@ -157,9 +158,8 @@ class StochasticExchange(SimulatedExchange):
             volumes = volume_gen.sample(self._times_to_generate)
 
         start_date = pd.to_datetime(self._start_date, format=self._start_date_format)
-        price_frame = pd.DataFrame([], columns=['date', 'price'], dtype=float)
-        volume_frame = pd.DataFrame(
-            [], columns=['date', 'volume'], dtype=float)
+        price_frame = pd.DataFrame( [], columns=['date', 'price'], dtype=float )
+        volume_frame = pd.DataFrame( [], columns=['date', 'volume'], dtype=float )
 
         price_frame['date'] = pd.date_range(
             start=start_date, periods=self._times_to_generate, freq="1min")
@@ -169,15 +169,15 @@ class StochasticExchange(SimulatedExchange):
         volume_frame['volume'] = abs(volumes)
 
         price_frame.set_index('date')
-        price_frame.index = pd.to_datetime(price_frame.index, unit='m', origin=start_date)
+        price_frame.index = pd.to_datetime( price_frame.index, unit='m', origin=start_date )
 
-        volume_frame.set_index('date')
-        volume_frame.index = pd.to_datetime(volume_frame.index, unit='m', origin=start_date)
+        volume_frame.set_index( 'date' )
+        volume_frame.index = pd.to_datetime( volume_frame.index, unit='m', origin=start_date )
 
-        data_frame = price_frame['price'].resample(self._timeframe).ohlc()
-        data_frame['volume'] = volume_frame['volume'].resample(self._timeframe).sum()
+        data_frame = price_frame['price'].resample( self._timeframe ).ohlc()
+        data_frame['volume'] = volume_frame['volume'].resample( self._timeframe ).sum()
 
-        self.data_frame = data_frame.astype(self._dtype)
+        self.data_frame = data_frame
 
-    def reset(self):
-        self._generate_price_history()
+    # def reset(self):
+    #    self._generate_price_history()
