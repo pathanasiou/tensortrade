@@ -12,25 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License
 
+from typing import List
+
 import numpy as np
 import pandas as pd
 
 import tensortrade.slippage as slippage
-
-from gym.spaces import Space, Box
-from typing import List, Dict
-from copy import deepcopy
-
-
-from tensortrade.trades import Trade, TradeType, TradeSide
-from tensortrade.orders import OrderStatus
-from tensortrade.instruments import TradingPair, Quantity
 from tensortrade.exchanges import Exchange
-from tensortrade.features import FeaturePipeline
+from tensortrade.instruments import TradingPair, Quantity
 from tensortrade.instruments import USD, BTC
+from tensortrade.orders import Order
+from tensortrade.trades import Trade, TradeType, TradeSide
+from tensortrade.wallets import Portfolio, Wallet
 
 
-class SimulatedExchange(Exchange):
+class SimulatedExchange( Exchange ):
     """An exchange, in which the price history is based off the supplied data frame and
     trade execution is largely decided by the designated slippage model.
 
@@ -39,23 +35,23 @@ class SimulatedExchange(Exchange):
     """
 
     def __init__(self, data_frame: pd.DataFrame = None, **kwargs):
-        self._commission = self.default('commission', 0.003, kwargs)
-        self._base_instrument = self.default('base_instrument', USD, kwargs)
-        self._quote_instrument = self.default('quote_instrument', BTC, kwargs)
-        self._initial_balance = self.default('initial_balance', 10000, kwargs)
-        self._min_trade_size = self.default('min_trade_size', 1e-6, kwargs)
-        self._max_trade_size = self.default('max_trade_size', 1e6, kwargs)
-        self._min_trade_price = self.default('min_trade_price', 1e-8, kwargs)
-        self._max_trade_price = self.default('max_trade_price', 1e8, kwargs)
-        self._randomize_time_slices = self.default('randomize_time_slices', False, kwargs)
-        self._min_time_slice = self.default('min_time_slice', 128, kwargs)
+        self._commission = self.default( 'commission', 0.003, kwargs )
+        self._base_instrument = self.default( 'base_instrument', USD, kwargs )
+        self._quote_instrument = self.default( 'quote_instrument', BTC, kwargs )
+        self._initial_balance = self.default( 'initial_balance', 10000, kwargs )
+        self._min_trade_size = self.default( 'min_trade_size', 1e-6, kwargs )
+        self._max_trade_size = self.default( 'max_trade_size', 1e6, kwargs )
+        self._min_trade_price = self.default( 'min_trade_price', 1e-8, kwargs )
+        self._max_trade_price = self.default( 'max_trade_price', 1e8, kwargs )
+        self._randomize_time_slices = self.default( 'randomize_time_slices', False, kwargs )
+        self._min_time_slice = self.default( 'min_time_slice', 128, kwargs )
 
-        self._price_column = self.default('price_column', 'close', kwargs)
-        self.data_frame = self.default('data_frame', data_frame)
+        self._price_column = self.default( 'price_column', 'close', kwargs )
+        self.data_frame = self.default( 'data_frame', data_frame )
 
-        slippage_model = self.default('slippage_model', 'uniform', kwargs)
-        self._slippage_model = slippage.get(slippage_model) if isinstance(
-            slippage_model, str) else slippage_model()
+        slippage_model = self.default( 'slippage_model', 'uniform', kwargs )
+        self._slippage_model = slippage.get( slippage_model ) \
+            if isinstance( slippage_model, str ) else slippage_model()
 
         self.reset()
 
@@ -66,11 +62,11 @@ class SimulatedExchange(Exchange):
     @property
     def data_frame(self) -> pd.DataFrame:
         """The underlying data model backing the price and volume simulation."""
-        return getattr(self, '_data_frame', None)
+        return getattr( self, '_data_frame', None )
 
     @data_frame.setter
     def data_frame(self, data_frame: pd.DataFrame = None):
-        if not isinstance(data_frame, pd.DataFrame):
+        if not isinstance( data_frame, pd.DataFrame ):
             self._data_frame = data_frame
             self._price_history = None
             return
@@ -83,19 +79,20 @@ class SimulatedExchange(Exchange):
     @property
     def observation_columns(self) -> List[str]:
         if self._data_frame is None:
+            # todo maybe make this an optional type
             return None
 
         data_frame = self._data_frame.iloc[0:10]
 
-        return data_frame.select_dtypes(include=[np.float, np.number]).columns
+        return data_frame.select_dtypes( include=[np.float, np.number] ).columns
 
     @property
     def has_next_observation(self) -> bool:
         return self._initial_step + self.clock.step < self._final_step
 
     def next_observation(self, window_size: int = 1) -> pd.DataFrame:
-        lower_range = max(self.clock.step + self._initial_step - window_size, self._initial_step)
-        upper_range = min(self.clock.step + self._initial_step + 1, self._final_step)
+        lower_range = max( self.clock.step + self._initial_step - window_size, self._initial_step )
+        upper_range = min( self.clock.step + self._initial_step + 1, self._final_step )
 
         obs = self._data_frame.iloc[lower_range:upper_range]
 
@@ -106,39 +103,41 @@ class SimulatedExchange(Exchange):
 
     def quote_price(self, trading_pair: TradingPair) -> float:
         if self._price_history is not None:
-            return float(self._price_history.iloc[self.clock.step])
+            return float( self._price_history.iloc[self.clock.step] )
 
         return np.inf
 
     def _contain_price(self, price: float) -> float:
-        return max(min(price, self._max_trade_price), self._min_trade_price)
+        return max( min( price, self._max_trade_price ), self._min_trade_price )
 
     def _contain_size(self, size: float) -> float:
-        return max(min(size, self._max_trade_size), self._min_trade_size)
+        return max( min( size, self._max_trade_size ), self._min_trade_size )
 
-    def _execute_buy_order(self, order: 'Order', base_wallet: 'Wallet', quote_wallet: 'Wallet', current_price: float) -> Trade:
-        price = self._contain_price(current_price)
+    def _execute_buy_order(self, order: 'Order', base_wallet: 'Wallet', quote_wallet: 'Wallet',
+                           current_price: float) -> Trade:
+        price = self._contain_price( current_price )
 
         if order.type == TradeType.LIMIT and order.price < current_price:
+            # TODO check if this can be made to Optional
             return None
 
-        commission = Quantity(order.pair.base, order.size * self._commission, order.path_id)
-        size = self._contain_size(order.size - commission.size)
+        commission = Quantity( order.pair.base, order.size * self._commission, order.path_id )
+        size = self._contain_size( order.size - commission.size )
 
         if order.type == TradeType.MARKET:
-            size = self._contain_size(order.price / price * order.size - commission.size)
+            size = self._contain_size( order.price / price * order.size - commission.size )
 
-        quantity = Quantity(order.pair.base, size, order.path_id)
+        quantity = Quantity( order.pair.base, size, order.path_id )
 
-        trade = Trade(order_id=order.id,
-                      exchange_id=self.id,
-                      step=self.clock.step,
-                      pair=order.pair,
-                      side=TradeSide.BUY,
-                      trade_type=order.type,
-                      quantity=quantity,
-                      price=price,
-                      commission=commission)
+        trade = Trade( order_id=order.id,
+                       exchange_id=self.id,
+                       step=self.clock.step,
+                       pair=order.pair,
+                       side=TradeSide.BUY,
+                       trade_type=order.type,
+                       quantity=quantity,
+                       price=price,
+                       commission=commission )
 
         # self._slippage_model.adjust_trade(trade)
 
@@ -146,61 +145,66 @@ class SimulatedExchange(Exchange):
 
         base_wallet -= quantity
         base_wallet -= commission
-        quote_wallet += Quantity(order.pair.quote, quote_size, order.path_id)
+        quote_wallet += Quantity( order.pair.quote, quote_size, order.path_id )
 
         return trade
 
-    def _execute_sell_order(self, order: 'Order', base_wallet: 'Wallet', quote_wallet: 'Wallet', current_price: float) -> Trade:
-        price = self._contain_price(current_price)
+    def _execute_sell_order(self, order: 'Order', base_wallet: 'Wallet', quote_wallet: 'Wallet',
+                            current_price: float) -> Trade:
+        price = self._contain_price( current_price )
 
         if order.type == TradeType.LIMIT and order.price > current_price:
+            # TODO check if this can become Optional
             return None
 
-        commission = Quantity(order.pair.base, order.size * self._commission, order.path_id)
-        size = self._contain_size(order.size - commission.size)
-        quantity = Quantity(order.pair.base, size, order.path_id)
+        commission = Quantity( order.pair.base, order.size * self._commission, order.path_id )
+        size = self._contain_size( order.size - commission.size )
+        quantity = Quantity( order.pair.base, size, order.path_id )
 
-        trade = Trade(order_id=order.id,
-                      exchange_id=self.id,
-                      step=self.clock.step,
-                      pair=order.pair,
-                      side=TradeSide.SELL,
-                      trade_type=order.type,
-                      quantity=quantity,
-                      price=price,
-                      commission=commission)
+        trade = Trade( order_id=order.id,
+                       exchange_id=self.id,
+                       step=self.clock.step,
+                       pair=order.pair,
+                       side=TradeSide.SELL,
+                       trade_type=order.type,
+                       quantity=quantity,
+                       price=price,
+                       commission=commission )
 
         # self._slippage_model.adjust_trade(trade)
 
         quote_size = trade.size / trade.price * (trade.price / order.price)
 
-        quote_wallet -= Quantity(order.pair.quote, quote_size, order.path_id)
+        quote_wallet -= Quantity( order.pair.quote, quote_size, order.path_id )
         base_wallet += quantity
         base_wallet -= commission
 
         return trade
 
     def execute_order(self, order: 'Order', portfolio: 'Portfolio'):
-        base_wallet = portfolio.get_wallet(self.id, order.pair.base)
-        quote_wallet = portfolio.get_wallet(self.id, order.pair.quote)
-        current_price = self.quote_price(order.pair)
+        base_wallet = portfolio.get_wallet( self.id, order.pair.base )
+        quote_wallet = portfolio.get_wallet( self.id, order.pair.quote )
+        current_price = self.quote_price( order.pair )
 
         if order.is_buy:
-            trade = self._execute_buy_order(order, base_wallet, quote_wallet, current_price)
+            trade = self._execute_buy_order( order, base_wallet, quote_wallet, current_price )
         elif order.is_sell:
-            trade = self._execute_sell_order(order, base_wallet, quote_wallet, current_price)
+            trade = self._execute_sell_order( order, base_wallet, quote_wallet, current_price )
         else:
             trade = None
 
         if trade:
-            order.fill(self, trade)
+            order.fill( self, trade )
 
     def reset(self):
         self._initial_step = 0
-        self._final_step = len(self._data_frame) - 1
+        if self._data_frame is not None:
+            self._final_step = len( self._data_frame ) - 1
+        else:
+            self._final_step = -1
 
         if self._randomize_time_slices:
             self._initial_step = np.random.randint(
-                0, len(self._data_frame) - self._min_time_slice - 2)
+                0, len( self._data_frame ) - self._min_time_slice - 2 )
             self._final_step = np.random.randint(
-                self._initial_step + self._min_time_slice, len(self._data_frame) - 1)
+                self._initial_step + self._min_time_slice, len( self._data_frame ) - 1 )
